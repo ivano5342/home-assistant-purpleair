@@ -32,6 +32,12 @@ def calc_aqi(value, index):
     return round((aqi_range/pm_range) * c + bp['aqi_low'])
 
 
+def optional_float(json_result, key):
+    """Return the field as a float, or None if the sensor didn't send it."""
+    value = json_result.get(key)
+    return None if value is None else float(value)
+
+
 # LRAPA conversion using the same formula as used by PurpleAir's map as of 2020-09-06
 def lrapa(value):
     return max(0, 0.5 * value - 0.66)
@@ -44,7 +50,7 @@ def calc_dewpoint(temp_f, humidity):
     do this too, to match the purpleair website).
     """
     if humidity <= 0:
-        return 0
+        return None
 
     temp_c = round((temp_f - 32) * 5.0/9.0)
 
@@ -58,8 +64,8 @@ def calc_dewpoint(temp_f, humidity):
 
 def process_heat_adjustments(json_result):
     """Since the purple air devices are affected by heat from itself, modify readings to account for difference"""
-    current_temp = float(json_result.get('current_temp_f', 0))
-    current_humidity = float(json_result.get('current_humidity', 0))
+    current_temp = float(json_result['current_temp_f'])
+    current_humidity = float(json_result['current_humidity'])
     new_temp = current_temp + TEMP_ADJUSTMENT
     new_humid = max(0, min(100, current_humidity + HUMIDITY_ADJUSTMENT))
 
@@ -211,8 +217,10 @@ class PurpleAirApi:
 
                     json = await response.json()
                     results[ip_address] = json
-            except asyncio.TimeoutError as err:
-                _LOGGER.warning('Timed out fetching Purple Air device %s: %s', ip_address, err)
+            except asyncio.TimeoutError:
+                # The sensor stalls for ~36 s every 120 s, so a timeout is routine. A WARNING is logged in
+                # _update only if the sensor stays unreachable past the grace period.
+                _LOGGER.debug('Timed out fetching Purple Air device %s', ip_address)
             except Exception as err:
                 _LOGGER.error('Unable to connect to Purple Air device %s: %s', ip_address, err)
 
@@ -235,42 +243,45 @@ class PurpleAirApi:
                 ip_address = node['ip_address']
                 result = results.get(ip_address)
 
-                if result is None:
-                    previous_failures = self._failed_polls.get(registered_sensor_id, 0) + 1
-                    self._failed_polls[registered_sensor_id] = previous_failures
+                new_node = None
+                if result is not None:
+                    try:
+                        pa_sensor_id = result['SensorId']
+                        is_dual = 'pm2.5_aqi_b' in result
+                        new_node = {
+                            'device_location': result['place'],
+                            'rssi': result['rssi'],
+                            'current_temp_raw': float(result['current_temp_f']),
+                            'current_humidity_raw': float(result['current_humidity']),
+                            'current_dewpoint_raw': optional_float(result, 'current_dewpoint_f'),
+                            'pressure': optional_float(result, 'pressure'),
+                            'is_dual': is_dual
+                        }
+                        new_node.update(process_pm_readings(result, is_dual))
+                        new_node.update(process_heat_adjustments(result))
+                    except (KeyError, TypeError, ValueError) as err:
+                        new_node = None
+                        _LOGGER.error('Unable to parse Purple Air data for %s: %s', registered_sensor_id, err)
+
+                if new_node is None:
+                    failures = self._failed_polls.get(registered_sensor_id, 0) + 1
+                    self._failed_polls[registered_sensor_id] = failures
                     last_success = self._last_success.get(registered_sensor_id)
                     if last_success is not None and poll_time - last_success >= self._grace_period:
                         nodes.pop(registered_sensor_id, None)
                         self._last_success.pop(registered_sensor_id, None)
-                        self._failed_polls.pop(registered_sensor_id, None)
-                        _LOGGER.debug('Dropped stale sensor %s after %s seconds without a good reply', registered_sensor_id, (poll_time - last_success).total_seconds())
+                        _LOGGER.warning('No good reply from Purple Air sensor %s for %.0f s (%s failed polls), marking it unavailable',
+                                        registered_sensor_id, (poll_time - last_success).total_seconds(), failures)
                     continue
 
-                try:
-                    pa_sensor_id = result['SensorId']
-                    is_dual = 'pm2.5_aqi_b' in result
-                    new_node = {
-                        'device_location': result['place'],
-                        'rssi': result['rssi'],
-                        'current_temp_raw': float(result['current_temp_f']),
-                        'current_humidity_raw': float(result['current_humidity']),
-                        'current_dewpoint_raw': float(result.get('current_dewpoint_f', 0)),
-                        'pressure': float(result.get('pressure', 0)),
-                        'is_dual': is_dual
-                    }
-                    new_node.update(process_pm_readings(result, is_dual))
-                    new_node.update(process_heat_adjustments(result))
-                    nodes[pa_sensor_id] = new_node
-                    previous_failures = self._failed_polls.get(pa_sensor_id, 0)
-                    if previous_failures:
-                        _LOGGER.info('Recovered sensor %s after %s failed polls', pa_sensor_id, previous_failures)
-                    self._failed_polls[pa_sensor_id] = 0
-                    self._last_success[pa_sensor_id] = poll_time
-                    _LOGGER.debug('Json results for %s: %s', pa_sensor_id, result)
-                    _LOGGER.debug('Readings for %s: %s', pa_sensor_id, nodes[pa_sensor_id])
-                except (KeyError, TypeError, ValueError) as err:
-                    self._failed_polls[registered_sensor_id] = self._failed_polls.get(registered_sensor_id, 0) + 1
-                    _LOGGER.error('Unable to parse Purple Air data for %s: %s', registered_sensor_id, err)
+                nodes[pa_sensor_id] = new_node
+                previous_failures = self._failed_polls.get(pa_sensor_id, 0)
+                if previous_failures:
+                    _LOGGER.info('Recovered sensor %s after %s failed polls', pa_sensor_id, previous_failures)
+                self._failed_polls[pa_sensor_id] = 0
+                self._last_success[pa_sensor_id] = poll_time
+                _LOGGER.debug('Json results for %s: %s', pa_sensor_id, result)
+                _LOGGER.debug('Readings for %s: %s', pa_sensor_id, nodes[pa_sensor_id])
 
             self._data = nodes
             async_dispatcher_send(self._hass, DISPATCHER_PURPLE_AIR)
