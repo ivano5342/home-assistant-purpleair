@@ -141,7 +141,10 @@ class PurpleAirApi:
         self._session = session
         self._nodes = {}
         self._data = {}
+        self._last_success = {}
+        self._failed_polls = {}
         self._scan_interval = timedelta(seconds=LOCAL_SCAN_INTERVAL)
+        self._grace_period = timedelta(seconds=90)
         self._shutdown_interval = None
         self._update_lock = asyncio.Lock()
 
@@ -194,26 +197,29 @@ class PurpleAirApi:
     async def _fetch_data(self, local_node_ips):
         if not local_node_ips:
             _LOGGER.debug('no nodes provided')
-            return []
+            return {}
 
         urls = list(map(LOCAL_URL_FORMAT.format, local_node_ips))
         _LOGGER.debug('fetch url list: %s', urls)
 
-        results = []
-        for url in urls:
+        results = {}
+        for ip_address in local_node_ips:
+            url = LOCAL_URL_FORMAT.format(ip_address)
             _LOGGER.debug('fetching url: %s', url)
 
             try:
                 timeout = aiohttp.ClientTimeout(total=8)
                 async with self._session.get(url, timeout=timeout) as response:
                     if response.status != 200:
-                        _LOGGER.error('bad API response for %s: %s', url, response.status)
+                        _LOGGER.warning('bad API response for %s: %s', url, response.status)
                         continue
 
                     json = await response.json()
-                    results.append(json)
-            except Exception:
-                _LOGGER.error('Unable to connect to purple air device: ' + url)
+                    results[ip_address] = json
+            except asyncio.TimeoutError as err:
+                _LOGGER.warning('Timed out fetching Purple Air device %s: %s', ip_address, err)
+            except Exception as err:
+                _LOGGER.error('Unable to connect to Purple Air device %s: %s', ip_address, err)
 
         return results
 
@@ -227,9 +233,24 @@ class PurpleAirApi:
 
         async with self._update_lock:
             results = await self._fetch_data(local_node_ips)
+            nodes = dict(self._data)
+            poll_time = dt.utcnow()
 
-            nodes = {}
-            for result in results:
+            for registered_sensor_id, node in self._nodes.items():
+                ip_address = node['ip_address']
+                result = results.get(ip_address)
+
+                if result is None:
+                    previous_failures = self._failed_polls.get(registered_sensor_id, 0) + 1
+                    self._failed_polls[registered_sensor_id] = previous_failures
+                    last_success = self._last_success.get(registered_sensor_id)
+                    if last_success is not None and poll_time - last_success >= self._grace_period:
+                        nodes.pop(registered_sensor_id, None)
+                        self._last_success.pop(registered_sensor_id, None)
+                        self._failed_polls.pop(registered_sensor_id, None)
+                        _LOGGER.debug('Dropped stale sensor %s after %s seconds without a good reply', registered_sensor_id, (poll_time - last_success).total_seconds())
+                    continue
+
                 try:
                     pa_sensor_id = result['SensorId']
                     is_dual = 'pm2.5_aqi_b' in result
@@ -245,10 +266,16 @@ class PurpleAirApi:
                     new_node.update(process_pm_readings(result, is_dual))
                     new_node.update(process_heat_adjustments(result))
                     nodes[pa_sensor_id] = new_node
+                    previous_failures = self._failed_polls.get(pa_sensor_id, 0)
+                    if previous_failures:
+                        _LOGGER.info('Recovered sensor %s after %s failed polls', pa_sensor_id, previous_failures)
+                    self._failed_polls[pa_sensor_id] = 0
+                    self._last_success[pa_sensor_id] = poll_time
                     _LOGGER.debug('Json results for %s: %s', pa_sensor_id, result)
                     _LOGGER.debug('Readings for %s: %s', pa_sensor_id, nodes[pa_sensor_id])
                 except (KeyError, TypeError, ValueError) as err:
-                    _LOGGER.error('Unable to parse Purple Air data: %s', err)
+                    self._failed_polls[registered_sensor_id] = self._failed_polls.get(registered_sensor_id, 0) + 1
+                    _LOGGER.error('Unable to parse Purple Air data for %s: %s', registered_sensor_id, err)
 
             self._data = nodes
             async_dispatcher_send(self._hass, DISPATCHER_PURPLE_AIR)
