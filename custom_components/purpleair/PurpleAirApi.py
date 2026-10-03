@@ -43,6 +43,9 @@ def calc_dewpoint(temp_f, humidity):
     Note: Rounding twice for both F>C and C>F conversions simply because the purpleair website does this (so I
     do this too, to match the purpleair website).
     """
+    if humidity <= 0:
+        return 0
+
     temp_c = round((temp_f - 32) * 5.0/9.0)
 
     numerator = 243.04 * (math.log(humidity / 100) + ((17.625 * temp_c) / (243.04 + temp_c)))
@@ -55,8 +58,10 @@ def calc_dewpoint(temp_f, humidity):
 
 def process_heat_adjustments(json_result):
     """Since the purple air devices are affected by heat from itself, modify readings to account for difference"""
-    new_temp = json_result['current_temp_f'] + TEMP_ADJUSTMENT
-    new_humid = min(100, json_result['current_humidity'] + HUMIDITY_ADJUSTMENT)
+    current_temp = float(json_result.get('current_temp_f', 0))
+    current_humidity = float(json_result.get('current_humidity', 0))
+    new_temp = current_temp + TEMP_ADJUSTMENT
+    new_humid = max(0, min(100, current_humidity + HUMIDITY_ADJUSTMENT))
 
     return {
         'current_temp': new_temp,
@@ -67,9 +72,9 @@ def process_heat_adjustments(json_result):
 
 def process_pm_readings(json_result, is_dual = False):
     """Processes Particle mass readings and confidence of said readings"""
-    readings = {'pm2_5_aqi_raw': json_result['pm2.5_aqi']}
+    readings = {'pm2_5_aqi_raw': json_result.get('pm2.5_aqi')}
     if is_dual:
-        readings['pm2_5_aqi_b_raw'] = json_result['pm2.5_aqi_b']
+        readings['pm2_5_aqi_b_raw'] = json_result.get('pm2.5_aqi_b')
 
     for prop in PARTICLE_PROPS:
         if prop not in json_result:
@@ -78,7 +83,7 @@ def process_pm_readings(json_result, is_dual = False):
 
         a = float(json_result[prop])
         prop_b = prop + '_b'  # Property name for sensor B
-        if is_dual and prop_b in json_result:
+        if is_dual and json_result.get(prop_b) is not None:
             (value, confidence) = process_dual_sensor_readings(a, float(json_result[prop_b]))
         else:
             value = a
@@ -90,27 +95,27 @@ def process_pm_readings(json_result, is_dual = False):
     readings['aqi_epa'] = calc_aqi(readings['pm2_5_atm'], 'pm2_5')
     readings['aqi_lrapa'] = calc_aqi(lrapa(readings['pm2_5_atm']), 'pm2_5')
     #
-    readings['aqi_tvoc'] = json_result['gas_680'] # todo: find somewhere better to put this !
-    readings['pm1_0_atm'] = json_result['pm1_0_atm']
-    readings['pm2_5_atm'] = json_result['pm2_5_atm']
-    readings['pm10_0_atm'] = json_result['pm10_0_atm']
-    readings['pm1_0_atm_b'] = json_result['pm1_0_atm_b']
-    readings['pm2_5_atm_b'] = json_result['pm2_5_atm_b']
-    readings['pm10_0_atm_b'] = json_result['pm10_0_atm_b']
-    readings['p_0_3_um'] = json_result['p_0_3_um']
-    readings['p_0_5_um'] = json_result['p_0_5_um']
-    readings['p_1_0_um'] = json_result['p_1_0_um']
-    readings['p_2_5_um'] = json_result['p_2_5_um']
-    readings['p_5_0_um'] = json_result['p_5_0_um']
-    readings['p_10_0_um'] = json_result['p_10_0_um_b']
-    readings['p_0_3_um_b'] = json_result['p_0_3_um_b']
-    readings['p_0_5_um_b'] = json_result['p_0_5_um_b']
-    readings['p_1_0_um_b'] = json_result['p_1_0_um_b']
-    readings['p_2_5_um_b'] = json_result['p_2_5_um_b']
-    readings['p_5_0_um_b'] = json_result['p_5_0_um_b']
-    readings['p_10_0_um_b'] = json_result['p_10_0_um_b']
-    readings['p25aqic'] = json_result['p25aqic']
-    readings['p25aqic_b'] = json_result['p25aqic_b']
+    readings['aqi_tvoc'] = json_result.get('gas_680')
+    readings['pm1_0_atm'] = json_result.get('pm1_0_atm')
+    readings['pm2_5_atm'] = json_result.get('pm2_5_atm')
+    readings['pm10_0_atm'] = json_result.get('pm10_0_atm')
+    readings['pm1_0_atm_b'] = json_result.get('pm1_0_atm_b')
+    readings['pm2_5_atm_b'] = json_result.get('pm2_5_atm_b')
+    readings['pm10_0_atm_b'] = json_result.get('pm10_0_atm_b')
+    readings['p_0_3_um'] = json_result.get('p_0_3_um')
+    readings['p_0_5_um'] = json_result.get('p_0_5_um')
+    readings['p_1_0_um'] = json_result.get('p_1_0_um')
+    readings['p_2_5_um'] = json_result.get('p_2_5_um')
+    readings['p_5_0_um'] = json_result.get('p_5_0_um')
+    readings['p_10_0_um'] = json_result.get('p_10_0_um_b')
+    readings['p_0_3_um_b'] = json_result.get('p_0_3_um_b')
+    readings['p_0_5_um_b'] = json_result.get('p_0_5_um_b')
+    readings['p_1_0_um_b'] = json_result.get('p_1_0_um_b')
+    readings['p_2_5_um_b'] = json_result.get('p_2_5_um_b')
+    readings['p_5_0_um_b'] = json_result.get('p_5_0_um_b')
+    readings['p_10_0_um_b'] = json_result.get('p_10_0_um_b')
+    readings['p25aqic'] = json_result.get('p25aqic')
+    readings['p25aqic_b'] = json_result.get('p25aqic_b')
     #
     return readings
 
@@ -203,6 +208,7 @@ class PurpleAirApi:
                 async with self._session.get(url, timeout=timeout) as response:
                     if response.status != 200:
                         _LOGGER.error('bad API response for %s: %s', url, response.status)
+                        continue
 
                     json = await response.json()
                     results.append(json)
@@ -224,21 +230,25 @@ class PurpleAirApi:
 
             nodes = {}
             for result in results:
-                pa_sensor_id = result['SensorId']
-                is_dual = 'pm2.5_aqi_b' in result
-                nodes[pa_sensor_id] = {
-                    'device_location': result['place'],
-                    'rssi': result['rssi'],
-                    'current_temp_raw': result['current_temp_f'],
-                    'current_humidity_raw': result['current_humidity'],
-                    'current_dewpoint_raw': result['current_dewpoint_f'],
-                    'pressure': result['pressure'],
-                    'is_dual': is_dual
-                }
-                nodes[pa_sensor_id].update(process_pm_readings(result, is_dual))
-                nodes[pa_sensor_id].update(process_heat_adjustments(result))
-                _LOGGER.debug('Json results for %s: %s', pa_sensor_id, result)
-                _LOGGER.debug('Readings for %s: %s', pa_sensor_id, nodes[pa_sensor_id])
+                try:
+                    pa_sensor_id = result['SensorId']
+                    is_dual = 'pm2.5_aqi_b' in result
+                    new_node = {
+                        'device_location': result['place'],
+                        'rssi': result['rssi'],
+                        'current_temp_raw': float(result['current_temp_f']),
+                        'current_humidity_raw': float(result['current_humidity']),
+                        'current_dewpoint_raw': float(result.get('current_dewpoint_f', 0)),
+                        'pressure': float(result.get('pressure', 0)),
+                        'is_dual': is_dual
+                    }
+                    new_node.update(process_pm_readings(result, is_dual))
+                    new_node.update(process_heat_adjustments(result))
+                    nodes[pa_sensor_id] = new_node
+                    _LOGGER.debug('Json results for %s: %s', pa_sensor_id, result)
+                    _LOGGER.debug('Readings for %s: %s', pa_sensor_id, nodes[pa_sensor_id])
+                except (KeyError, TypeError, ValueError) as err:
+                    _LOGGER.error('Unable to parse Purple Air data: %s', err)
 
             self._data = nodes
             async_dispatcher_send(self._hass, DISPATCHER_PURPLE_AIR)
