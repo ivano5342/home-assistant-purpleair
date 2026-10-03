@@ -1,7 +1,10 @@
+import asyncio
 from datetime import timedelta
 import logging
 
 import math
+
+import aiohttp
 
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval, async_track_point_in_utc_time
@@ -135,6 +138,7 @@ class PurpleAirApi:
         self._data = {}
         self._scan_interval = timedelta(seconds=LOCAL_SCAN_INTERVAL)
         self._shutdown_interval = None
+        self._update_lock = asyncio.Lock()
 
     def is_node_registered(self, pa_sensor_id):
         return pa_sensor_id in self._data
@@ -195,7 +199,8 @@ class PurpleAirApi:
             _LOGGER.debug('fetching url: %s', url)
 
             try:
-                async with self._session.get(url) as response:
+                timeout = aiohttp.ClientTimeout(total=8)
+                async with self._session.get(url, timeout=timeout) as response:
                     if response.status != 200:
                         _LOGGER.error('bad API response for %s: %s', url, response.status)
 
@@ -210,25 +215,30 @@ class PurpleAirApi:
         local_node_ips = [n['ip_address'] for n in self._nodes.values()]
         _LOGGER.debug('Purple Air nodes: %s', local_node_ips)
 
-        results = await self._fetch_data(local_node_ips)
+        if self._update_lock.locked():
+            _LOGGER.debug('Skipping poll tick because previous update is still running')
+            return
 
-        nodes = {}
-        for result in results:
-            pa_sensor_id = result['SensorId']
-            is_dual = 'pm2.5_aqi_b' in result
-            nodes[pa_sensor_id] = {
-                'device_location': result['place'],
-                'rssi': result['rssi'],
-                'current_temp_raw': result['current_temp_f'],
-                'current_humidity_raw': result['current_humidity'],
-                'current_dewpoint_raw': result['current_dewpoint_f'],
-                'pressure': result['pressure'],
-                'is_dual': is_dual
-            }
-            nodes[pa_sensor_id].update(process_pm_readings(result, is_dual))
-            nodes[pa_sensor_id].update(process_heat_adjustments(result))
-            _LOGGER.debug('Json results for %s: %s', pa_sensor_id, result)
-            _LOGGER.debug('Readings for %s: %s', pa_sensor_id, nodes[pa_sensor_id])
+        async with self._update_lock:
+            results = await self._fetch_data(local_node_ips)
 
-        self._data = nodes
-        async_dispatcher_send(self._hass, DISPATCHER_PURPLE_AIR)
+            nodes = {}
+            for result in results:
+                pa_sensor_id = result['SensorId']
+                is_dual = 'pm2.5_aqi_b' in result
+                nodes[pa_sensor_id] = {
+                    'device_location': result['place'],
+                    'rssi': result['rssi'],
+                    'current_temp_raw': result['current_temp_f'],
+                    'current_humidity_raw': result['current_humidity'],
+                    'current_dewpoint_raw': result['current_dewpoint_f'],
+                    'pressure': result['pressure'],
+                    'is_dual': is_dual
+                }
+                nodes[pa_sensor_id].update(process_pm_readings(result, is_dual))
+                nodes[pa_sensor_id].update(process_heat_adjustments(result))
+                _LOGGER.debug('Json results for %s: %s', pa_sensor_id, result)
+                _LOGGER.debug('Readings for %s: %s', pa_sensor_id, nodes[pa_sensor_id])
+
+            self._data = nodes
+            async_dispatcher_send(self._hass, DISPATCHER_PURPLE_AIR)
