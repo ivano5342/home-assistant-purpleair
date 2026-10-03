@@ -86,6 +86,29 @@ def process_pm_readings(json_result, is_dual = False):
 
     readings['aqi_epa'] = calc_aqi(readings['pm2_5_atm'], 'pm2_5')
     readings['aqi_lrapa'] = calc_aqi(lrapa(readings['pm2_5_atm']), 'pm2_5')
+    #
+    readings['aqi_tvoc'] = json_result['gas_680'] # todo: find somewhere better to put this !
+    readings['pm1_0_atm'] = json_result['pm1_0_atm']
+    readings['pm2_5_atm'] = json_result['pm2_5_atm']
+    readings['pm10_0_atm'] = json_result['pm10_0_atm']
+    readings['pm1_0_atm_b'] = json_result['pm1_0_atm_b']
+    readings['pm2_5_atm_b'] = json_result['pm2_5_atm_b']
+    readings['pm10_0_atm_b'] = json_result['pm10_0_atm_b']
+    readings['p_0_3_um'] = json_result['p_0_3_um']
+    readings['p_0_5_um'] = json_result['p_0_5_um']
+    readings['p_1_0_um'] = json_result['p_1_0_um']
+    readings['p_2_5_um'] = json_result['p_2_5_um']
+    readings['p_5_0_um'] = json_result['p_5_0_um']
+    readings['p_10_0_um'] = json_result['p_10_0_um_b']
+    readings['p_0_3_um_b'] = json_result['p_0_3_um_b']
+    readings['p_0_5_um_b'] = json_result['p_0_5_um_b']
+    readings['p_1_0_um_b'] = json_result['p_1_0_um_b']
+    readings['p_2_5_um_b'] = json_result['p_2_5_um_b']
+    readings['p_5_0_um_b'] = json_result['p_5_0_um_b']
+    readings['p_10_0_um_b'] = json_result['p_10_0_um_b']
+    readings['p25aqic'] = json_result['p25aqic']
+    readings['p25aqic_b'] = json_result['p25aqic_b']
+    #
     return readings
 
 def process_dual_sensor_readings(a, b):
