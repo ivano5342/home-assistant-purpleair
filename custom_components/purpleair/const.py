@@ -73,8 +73,8 @@ HUMIDITY_ADJUSTMENT = (
     +4  
 ) # From PurpleAir javascript: `(hum = parseInt(hum) + 4) > 100 && (hum = 100)`
 
-LOCAL_SCAN_INTERVAL = 30
-LOCAL_URL_FORMAT = "http://{0}/json?live=false"
+LOCAL_SCAN_INTERVAL = 10
+LOCAL_URL_FORMAT = "http://{0}/json?live=true"
 
 # Models
 PMS_SENSOR = "PMS"
