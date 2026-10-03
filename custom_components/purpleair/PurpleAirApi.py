@@ -94,11 +94,7 @@ def process_pm_readings(json_result, is_dual = False):
 
     readings['aqi_epa'] = calc_aqi(readings['pm2_5_atm'], 'pm2_5')
     readings['aqi_lrapa'] = calc_aqi(lrapa(readings['pm2_5_atm']), 'pm2_5')
-    #
     readings['aqi_tvoc'] = json_result.get('gas_680')
-    readings['pm1_0_atm'] = json_result.get('pm1_0_atm')
-    readings['pm2_5_atm'] = json_result.get('pm2_5_atm')
-    readings['pm10_0_atm'] = json_result.get('pm10_0_atm')
     readings['pm1_0_atm_b'] = json_result.get('pm1_0_atm_b')
     readings['pm2_5_atm_b'] = json_result.get('pm2_5_atm_b')
     readings['pm10_0_atm_b'] = json_result.get('pm10_0_atm_b')
@@ -116,7 +112,6 @@ def process_pm_readings(json_result, is_dual = False):
     readings['p_10_0_um_b'] = json_result.get('p_10_0_um_b')
     readings['p25aqic'] = json_result.get('p25aqic')
     readings['p25aqic_b'] = json_result.get('p25aqic_b')
-    #
     return readings
 
 def process_dual_sensor_readings(a, b):
